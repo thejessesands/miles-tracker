@@ -95,12 +95,17 @@ export async function POST() {
       }
     );
 
-    if (!listing.ok) {
-      return NextResponse.json(
-        { error: 'Gmail search failed.' },
-        { status: 400 }
-      );
-    }
+  if (!listing.ok) {
+  const details = await listing.text();
+  console.error('Gmail API error:', listing.status, details);
+
+  return NextResponse.json(
+    {
+      error: `Gmail search failed (Google status ${listing.status}). Check Vercel logs for details.`
+    },
+    { status: 400 }
+  );
+}
 
     const result = await listing.json();
 
