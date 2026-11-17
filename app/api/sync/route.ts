@@ -12,6 +12,6 @@ export async function POST(){
  const admin=adminDb();const {data:existing}=await admin.from('gmail_scan_state').select('phase').eq('user_id',user.id).maybeSingle();
  const {error}=await admin.from('gmail_scan_state').upsert({user_id:user.id,refresh_token_encrypted:encrypt(refresh),access_token_encrypted:session?.provider_token?encrypt(session.provider_token):null,access_expires_at:null,phase:existing?.phase||'historical',updated_at:new Date().toISOString(),retry_after:null,last_error:null},{onConflict:'user_id'});
  if(error)throw error;
- return NextResponse.json({ok:true,note:'Automatic three-year Gmail scan enabled. Background processing runs every 15 minutes.'});
+ note: 'Daily Gmail scanning enabled. New balances and memberships will be suggested for your approval, my liege.'
  }catch(e){return NextResponse.json({error:(e as Error).message},{status:500});}
 }
