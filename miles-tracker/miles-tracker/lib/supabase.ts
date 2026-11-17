@@ -1,5 +1,4 @@
-import { createBrowserClient, createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { createBrowserClient } from "@supabase/ssr";
 
 export function browserDb() {
   return createBrowserClient(
@@ -9,28 +8,3 @@ export function browserDb() {
 }
 
 export const supabaseBrowser = browserDb;
-
-export async function serverDb() {
-  const cookieStore = await cookies();
-
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
-            });
-          } catch {
-            // Cookies cannot always be modified in Server Components.
-          }
-        },
-      },
-    }
-  );
-}
