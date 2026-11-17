@@ -170,9 +170,15 @@ export default function Home() {
   const all = [
     ...PROGRAMS.map(p => ({...p,record:rows.find(r => r.program_id === p.id), discoveredNumber:null as string|null, expiresAt:(rows.find(r => r.program_id === p.id) as (Balance & {expires_at?:string|null})|undefined)?.expires_at || null})),
     ...discoveries.filter(d => d.confirmed && !d.dismissed).map(d => ({
-      id:'discovered:'+d.id,name:d.program_name,category:d.category,unit:'points',color:'#64748b',
-      record:undefined as Balance | undefined, discoveredNumber:d.membership_number, expiresAt:d.expires_at
-    }))
+  id: 'discovered:' + d.id,
+  name: d.program_name,
+  category: d.category,
+  unit: 'points',
+  color: '#64748b',
+  record: rows.find(r => r.program_id === 'discovered:' + d.id),
+  discoveredNumber: d.membership_number,
+  expiresAt: d.expires_at
+}))
   ].sort((a,b)=>a.name.localeCompare(b.name));
 
   const tracked = all.filter(p => !!p.record || p.id.startsWith('discovered:'));
