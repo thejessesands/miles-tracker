@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { browserDb } from '../lib/supabase';
+import { browserDb } from '@/lib/supabase';
 import { PROGRAMS, type Balance } from '../lib/programs';
 import type { User } from '@supabase/supabase-js';
 import {
