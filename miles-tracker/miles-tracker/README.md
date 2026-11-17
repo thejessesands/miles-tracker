@@ -24,3 +24,4 @@ Copy `.env.example` to `.env.local`, fill in Supabase values, then run `npm inst
 - Value estimates are **illustrative**, not official or guaranteed redemption values. Edit `lib/programs.ts` to adjust them.
 - The Hawaiian/Atmos program is grouped as a single entry; confirm the current program name and balance directly with the provider.
 - Before broader use, add more robust source authentication, parser tests, per-user sync rate limits, audit logging, and tighter Gmail search queries to avoid confusing promotional messages with account statements.
+Initial deployment of Miles & Points Tracker.
