@@ -561,7 +561,7 @@ export default function Home() {
         </section>
 
         <footer>
-          MADE FOR THE JOURNEY AHEAD <span>✦</span> MILES & POINTS
+          MADE FOR THE JOURNEYS AHEAD <span>✦</span> MILES & POINTS
         </footer>
       </main>
     </div>
