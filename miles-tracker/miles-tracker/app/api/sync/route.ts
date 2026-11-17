@@ -1,5 +1,5 @@
 import {NextResponse} from 'next/server';
-import {serverDb} from '../../../lib/supabase';
+import { serverDb } from '../../../lib/supabase-server';
 import {collectParts,extractBalances} from '../../../lib/parse';
 export const maxDuration=60;
 export async function POST(){
