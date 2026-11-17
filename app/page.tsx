@@ -1,3 +1,4 @@
+```
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -21,7 +22,7 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
   const [rows, setRows] = useState<Balance[]>([]);
-  const [discoveries, setDiscoveries] = useState<{id:string;program_name:string;category:string;membership_number:string|null;confirmed:boolean}[]>([]);
+  const [discoveries, setDiscoveries] = useState<{id:string;program_name:string;category:string;membership_number:string|null;confirmed:boolean;dismissed:boolean;expires_at:string|null}[]>([]);
   const [scanStatus, setScanStatus] = useState<{phase:string;scanned_total:number;last_scan_at:string|null;last_error:string|null;retry_after:string|null}|null>(null);
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState('');
@@ -29,6 +30,11 @@ export default function Home() {
   const [entry, setEntry] = useState('');
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
+  const [editField, setEditField] = useState<'balance'|'membership'|'expiry'>('balance');
+  const [addingProgram, setAddingProgram] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newCategory, setNewCategory] = useState('Airlines');
+  const [newNumber, setNewNumber] = useState('');
 
   const db = useMemo(() => browserDb(), []);
 
@@ -41,7 +47,7 @@ export default function Home() {
     if (u) {
       const { data } = await db.from('balances').select('*');
       setRows((data || []) as Balance[]);
-      const {data:found}=await db.from('discovered_programs').select('id,program_name,category,membership_number,confirmed');
+      const {data:found}=await db.from('discovered_programs').select('id,program_name,category,membership_number,confirmed,dismissed,expires_at');
       setDiscoveries(found || []);
       const status=await fetch('/api/scan-status').then(r=>r.ok?r.json():null).catch(()=>null);
       setScanStatus(status?.scan || null);
@@ -73,6 +79,53 @@ export default function Home() {
     if(error)setMessage(error.message);else await reload();
   }
 
+  async function dismissDiscovery(id:string) {
+    const {error}=await db.from('discovered_programs').update({dismissed:true,confirmed:false}).eq('id',id);
+    if(error)setMessage(error.message);else await reload();
+  }
+
+  async function addProgram() {
+    if (!user || !newName.trim()) { setMessage('Enter a program name.'); return; }
+    const match = discoveries.find(d => d.program_name.toLowerCase() === newName.trim().toLowerCase());
+    if (match) {
+      const {error} = await db.from('discovered_programs').update({confirmed:true,dismissed:false,category:newCategory,membership_number:newNumber.trim()||null}).eq('id',match.id);
+      if(error){setMessage(error.message);return;}
+    } else {
+      const {error}=await db.from('discovered_programs').insert({user_id:user.id,program_name:newName.trim(),category:newCategory,membership_number:newNumber.trim()||null,confirmed:true,dismissed:false});
+      if(error){setMessage(error.message);return;}
+    }
+    setAddingProgram(false);setNewName('');setNewNumber('');setMessage('Program added.');await reload();
+  }
+
+  async function saveField(id:string,field:'balance'|'membership'|'expiry',value:string) {
+    if (!user) return;
+    const discovered = id.startsWith('discovered:');
+    const cleanId = id.replace(/^discovered:/,'');
+    if (field === 'balance') {
+      const balance=Number(value.replace(/,/g,''));
+      if (!Number.isSafeInteger(balance)||balance<0) {setMessage('Enter a valid nonnegative whole number.');return;}
+      if (discovered) {setMessage('Balance editing for manually added programs requires a separate API update.');return;}
+      const res=await fetch('/api/balances',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({program_id:id,balance})});
+      const json=await res.json();if(!res.ok){setMessage(json.error||'Unable to save balance.');return;}
+    } else if (discovered) {
+      const patch=field==='membership'?{membership_number:value.trim()||null}:{expires_at:value||null};
+      const {error}=await db.from('discovered_programs').update(patch).eq('id',cleanId);
+      if(error){setMessage(error.message);return;}
+    } else {
+      const record=rows.find(r=>r.program_id===id);
+      const patch=field==='membership'?{membership_number:value.trim()||null}:{expires_at:value||null};
+      const {error}=record
+        ? await db.from('balances').update(patch).eq('program_id',id).eq('user_id',user.id)
+        : await db.from('balances').insert({user_id:user.id,program_id:id,balance:0,source:'manual',...patch});
+      if(error){setMessage(error.message);return;}
+    }
+    setEditing(null);setMessage('Saved.');await reload();
+  }
+
+  function beginEdit(id:string,field:'balance'|'membership'|'expiry',value:string){
+    setEditing(id);setEditField(field);setEntry(value);
+  }
+
   async function signIn() {
     setMessage('');
 
@@ -89,36 +142,6 @@ export default function Home() {
     });
 
     if (error) setMessage(error.message);
-  }
-
-  async function save(id: string) {
-    const balance = Number(entry.replace(/,/g, ''));
-
-    if (id.startsWith('discovered:')) { setMessage('Balance editing for discovered programs is not yet supported.'); return; }
-    if (!Number.isSafeInteger(balance) || balance < 0) {
-      setMessage('Enter a valid nonnegative whole number.');
-      return;
-    }
-
-    const res = await fetch('/api/balances', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        program_id: id,
-        balance
-      })
-    });
-
-    const json = await res.json();
-
-    if (!res.ok) {
-      setMessage(json.error || 'Unable to save');
-      return;
-    }
-
-    setEditing(null);
-    setMessage('Balance saved.');
-    await reload();
   }
 
   async function sync() {
@@ -147,14 +170,15 @@ export default function Home() {
   }
 
   const all = [
-    ...PROGRAMS.map(p => ({...p,record:rows.find(r => r.program_id === p.id)})),
-    ...discoveries.filter(d => d.confirmed).map(d => ({
+    ...PROGRAMS.map(p => ({...p,record:rows.find(r => r.program_id === p.id), discoveredNumber:null as string|null, expiresAt:(rows.find(r => r.program_id === p.id) as (Balance & {expires_at?:string|null})|undefined)?.expires_at || null})),
+    ...discoveries.filter(d => d.confirmed && !d.dismissed).map(d => ({
       id:'discovered:'+d.id,name:d.program_name,category:d.category,unit:'points',color:'#64748b',
-      record:undefined as Balance | undefined, discoveredNumber:d.membership_number
+      record:undefined as Balance | undefined, discoveredNumber:d.membership_number, expiresAt:d.expires_at
     }))
   ].sort((a,b)=>a.name.localeCompare(b.name));
 
-  const tracked = all.filter(p => !!p.record);
+  const tracked = all.filter(p => !!p.record || p.id.startsWith('discovered:'));
+  const expiring = all.filter(p => p.expiresAt && new Date(p.expiresAt).getTime() >= Date.now() && new Date(p.expiresAt).getTime() <= Date.now()+90*86400000).sort((a,b)=>new Date(a.expiresAt!).getTime()-new Date(b.expiresAt!).getTime());
 
   const stale = tracked.filter(
     p =>
@@ -351,15 +375,31 @@ export default function Home() {
             {scanStatus.last_scan_at && ` Last completed: ${new Date(scanStatus.last_scan_at).toLocaleString()}.`}
             {scanStatus.last_error && ` Retrying after error: ${scanStatus.last_error}`}
           </div>}
-          {discoveries.some(d=>!d.confirmed) && <div className="notice" style={{display:'block'}}>
+          {discoveries.some(d=>!d.confirmed && !d.dismissed) && <div className="notice" style={{display:'block'}}>
             <strong>Possible memberships — confirm the programs you actually use:</strong>
-            {discoveries.filter(d=>!d.confirmed).sort((a,b)=>a.program_name.localeCompare(b.program_name)).map(d=>(
+            {discoveries.filter(d=>!d.confirmed && !d.dismissed).sort((a,b)=>a.program_name.localeCompare(b.program_name)).map(d=>(
               <div key={d.id} style={{marginTop:10,display:'flex',gap:12,alignItems:'center',justifyContent:'space-between'}}>
                 <span>{d.program_name}{d.membership_number?` · Member ${d.membership_number}`:''}</span>
-                <button className="edit" onClick={()=>confirmDiscovery(d.id,true)}>Add program</button>
+                <div style={{display:"flex",gap:8}}><button className="edit" onClick={()=>confirmDiscovery(d.id,true)}>Add program</button><button className="edit" onClick={()=>dismissDiscovery(d.id)}>Dismiss</button></div>
               </div>
             ))}
           </div>}
+          <div className="notice" style={{display:'block'}}>
+            <strong>Miles expiring soon (next 90 days)</strong>
+            {expiring.length ? expiring.map(p => {
+              const days=Math.ceil((new Date(p.expiresAt!).getTime()-Date.now())/86400000);
+              return <div key={p.id} style={{marginTop:8}}>{p.name}: {new Date(p.expiresAt!).toLocaleDateString()} — {days} days remaining{days<=30?' · Urgent':days<=60?' · Within 60 days':' · Within 90 days'}</div>;
+            }) : <div style={{marginTop:8}}>No recorded expiration dates within 90 days. Use “Set expiration” on an account to add one.</div>}
+          </div>
+          <div style={{margin:'16px 0'}}>
+            <button className="sync" onClick={()=>setAddingProgram(!addingProgram)}>{addingProgram?'Cancel':'Add a loyalty program manually'}</button>
+            {addingProgram && <div className="notice" style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:10}}>
+              <input aria-label="Program name" placeholder="Program name" value={newName} onChange={e=>setNewName(e.target.value)}/>
+              <select aria-label="Category" value={newCategory} onChange={e=>setNewCategory(e.target.value)}>{['Airlines','Hotels','Credit Cards'].map(c=><option key={c}>{c}</option>)}</select>
+              <input aria-label="Membership number" placeholder="Membership number (optional)" value={newNumber} onChange={e=>setNewNumber(e.target.value)}/>
+              <button className="edit" onClick={addProgram}>Save program</button>
+            </div>}
+          </div>
           <div className="toolbar">
             <div className="filters">
               {['All', 'Airlines', 'Hotels', 'Credit Cards'].map(f => (
@@ -430,13 +470,12 @@ export default function Home() {
                     </td>
 
                     <td>
-                      <span className="membership">
-                        {p.record?.membership_number || ('discoveredNumber' in p ? p.discoveredNumber : null) || 'Not found'}
-                      </span>
+                      {editing===p.id && editField==='membership' ? <input className="balance-input" aria-label="Membership number" autoFocus value={entry} onChange={e=>setEntry(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')void saveField(p.id,'membership',entry);if(e.key==='Escape')setEditing(null);}}/> : <span className="membership">{p.record?.membership_number || p.discoveredNumber || 'Not entered'}</span>}
+                      <div><button className="edit" onClick={()=>editing===p.id&&editField==='membership'?void saveField(p.id,'membership',entry):beginEdit(p.id,'membership',p.record?.membership_number||p.discoveredNumber||'')}>{editing===p.id&&editField==='membership'?'Save':'Edit number'}</button></div>
                     </td>
 
                     <td>
-                      {editing === p.id ? (
+                      {editing === p.id && editField === 'balance' ? (
                         <input
                           className="balance-input"
                           type="text"
@@ -445,7 +484,7 @@ export default function Home() {
                           value={entry}
                           onChange={e => setEntry(e.target.value)}
                           onKeyDown={e => {
-                            if (e.key === 'Enter') save(p.id);
+                            if (e.key === 'Enter') void saveField(p.id,'balance',entry);
                             if (e.key === 'Escape') setEditing(null);
                           }}
                         />
@@ -486,11 +525,10 @@ export default function Home() {
                       <button
                         className="edit"
                         onClick={() => {
-                          if (editing === p.id) {
-                            save(p.id);
+                          if (editing === p.id && editField === 'balance') {
+                            void saveField(p.id,'balance',entry);
                           } else {
-                            setEditing(p.id);
-                            setEntry(String(p.record?.balance ?? ''));
+                            beginEdit(p.id,'balance',String(p.record?.balance ?? ''));
                           }
                         }}
                       >
@@ -500,6 +538,10 @@ export default function Home() {
                             ? 'Edit'
                             : 'Add balance'}
                       </button>
+                      <div style={{marginTop:6}}>
+                        {editing===p.id && editField==='expiry' ? <input aria-label="Expiration date" type="date" value={entry} onChange={e=>setEntry(e.target.value)}/> : <small>{p.expiresAt?'Expires '+new Date(p.expiresAt).toLocaleDateString():'Expiration unknown'}</small>}
+                      </div>
+                      <button className="edit" onClick={()=>editing===p.id&&editField==='expiry'?void saveField(p.id,'expiry',entry):beginEdit(p.id,'expiry',p.expiresAt?.slice(0,10)||'')}>{editing===p.id&&editField==='expiry'?'Save date':'Set expiration'}</button>
                     </td>
                   </tr>
                 ))}
@@ -527,3 +569,5 @@ export default function Home() {
     </div>
   );
 }
+
+```
