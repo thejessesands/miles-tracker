@@ -9,7 +9,13 @@ import {
 
 export const maxDuration = 60;
 
-type Candidate = {
+const QUERY =
+  'newer_than:5y {balance points miles Avios membership "member number" "frequent flyer" "loyalty account" "welcome to"}';
+
+const MAX_PAGES = 2;
+const MAX_TIME_MS = 40000;
+
+type BalanceCandidate = {
   balance: number;
   when: number;
   id: string;
@@ -20,7 +26,7 @@ type MembershipCandidate = {
   when: number;
 };
 
-type Discovery = {
+type DiscoveryCandidate = {
   program_name: string;
   category: string;
   membership_number: string | null;
@@ -31,7 +37,9 @@ type Discovery = {
 export async function POST() {
   const db = await serverDb();
 
-  const { data: { user } } = await db.auth.getUser();
+  const {
+    data: { user }
+  } = await db.auth.getUser();
 
   if (!user) {
     return NextResponse.json(
@@ -40,12 +48,18 @@ export async function POST() {
     );
   }
 
-  const { data: { session } } = await db.auth.getSession();
+  const {
+    data: { session }
+  } = await db.auth.getSession();
+
   const token = session?.provider_token;
 
   if (!token) {
     return NextResponse.json(
-      { error: 'Gmail authorization needs renewal. Sign out and reconnect Google.' },
+      {
+        error:
+          'Gmail authorization needs renewal. Sign out and reconnect Google.'
+      },
       { status: 400 }
     );
   }
@@ -54,32 +68,56 @@ export async function POST() {
     Authorization: `Bearer ${token}`
   };
 
-  // Search up to five years of Gmail history.
-  const query =
-    'newer_than:5y {balance points miles Avios membership "member number" "frequent flyer" "loyalty account" "welcome to"}';
+  const {
+    data: progress,
+    error: progressError
+  } = await db
+    .from('gmail_scan_progress')
+    .select('page_token,scanned_total')
+    .eq('user_id', user.id)
+    .maybeSingle();
 
-  const balances = new Map<string, Candidate>();
-  const memberships = new Map<string, MembershipCandidate>();
-  const discoveries = new Map<string, Discovery>();
+  if (progressError) {
+    return NextResponse.json(
+      { error: 'Unable to load Gmail scan progress.' },
+      { status: 500 }
+    );
+  }
+
+  let pageToken: string | undefined =
+    progress?.page_token || undefined;
+
+  let scannedTotal = progress?.scanned_total || 0;
+
+  // A completed scan is marked with a null page token.
+  if (progress && !progress.page_token && scannedTotal > 0) {
+    return NextResponse.json({
+      scanned: 0,
+      scannedTotal,
+      updated: 0,
+      numbersFound: 0,
+      programsFound: 0,
+      complete: true,
+      note: 'Five-year Gmail scan is already complete.'
+    });
+  }
+
+  const started = Date.now();
 
   let scanned = 0;
   let pages = 0;
-  let pageToken: string | undefined;
-
-  // Limit work per request to reduce the risk of timeouts.
-  // A complete five-year scan may require multiple runs.
-  const maxPages = 5;
-  const maxMessages = 150;
-  const started = Date.now();
+  let updated = 0;
+  let numbersFound = 0;
+  let programsFound = 0;
+  let complete = false;
 
   while (
-    pages < maxPages &&
-    scanned < maxMessages &&
-    Date.now() - started < 45000
+    pages < MAX_PAGES &&
+    Date.now() - started < MAX_TIME_MS
   ) {
     const params = new URLSearchParams({
-      maxResults: '100',
-      q: query
+      maxResults: '50',
+      q: QUERY
     });
 
     if (pageToken) {
@@ -95,33 +133,42 @@ export async function POST() {
       }
     );
 
-  if (!listing.ok) {
-  const details = await listing.text();
-  console.error('Gmail API error:', listing.status, details);
+    if (!listing.ok) {
+      const details = await listing.text();
 
-  return NextResponse.json(
-    {
-      error: `Gmail search failed (Google status ${listing.status}). Check Vercel logs for details.`
-    },
-    { status: 400 }
-  );
-}
+      console.error(
+        'Gmail API error:',
+        listing.status,
+        details
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            `Gmail search failed (Google status ${listing.status}).`
+        },
+        { status: 400 }
+      );
+    }
 
     const result = await listing.json();
 
     const ids: string[] =
-      result.messages?.map((m: { id: string }) => m.id) || [];
+      result.messages?.map(
+        (m: { id: string }) => m.id
+      ) || [];
 
-    pages++;
+    const balances = new Map<string, BalanceCandidate>();
 
+    const memberships =
+      new Map<string, MembershipCandidate>();
+
+    const discoveries =
+      new Map<string, DiscoveryCandidate>();
+
+    // Process every message on this page before
+    // advancing the saved pagination token.
     for (const id of ids) {
-      if (
-        scanned >= maxMessages ||
-        Date.now() - started >= 45000
-      ) {
-        break;
-      }
-
       const response = await fetch(
         'https://gmail.googleapis.com/gmail/v1/users/me/messages/' +
           id +
@@ -132,7 +179,21 @@ export async function POST() {
         }
       );
 
-      if (!response.ok) continue;
+      if (!response.ok) {
+        console.error(
+          'Unable to retrieve Gmail message:',
+          response.status
+        );
+
+        // Do not advance past an incomplete page.
+        return NextResponse.json(
+          {
+            error:
+              'A Gmail message could not be retrieved. Retry the scan.'
+          },
+          { status: 502 }
+        );
+      }
 
       const message = await response.json();
 
@@ -151,7 +212,6 @@ export async function POST() {
 
       const when = Number(message.internalDate || 0);
 
-      // Extract balances.
       for (const found of extractBalances(subject, body)) {
         const old = balances.get(found.program_id);
 
@@ -164,7 +224,6 @@ export async function POST() {
         }
       }
 
-      // Extract membership numbers.
       for (const found of extractMemberships(subject, body)) {
         const old = memberships.get(found.program_id);
 
@@ -176,7 +235,6 @@ export async function POST() {
         }
       }
 
-      // Discover additional programs.
       for (const found of discoverPrograms(subject, body)) {
         const old = discoveries.get(found.program_name);
 
@@ -192,109 +250,187 @@ export async function POST() {
       }
     }
 
-    pageToken = result.nextPageToken;
+    // Save balances and membership numbers for this page.
+    for (const [program_id, candidate] of balances) {
+      const { data: existing, error: readError } = await db
+        .from('balances')
+        .select(
+          'balance,verified_at,source,membership_number'
+        )
+        .eq('user_id', user.id)
+        .eq('program_id', program_id)
+        .maybeSingle();
 
-    if (!pageToken) break;
-  }
+      if (readError) {
+        return NextResponse.json(
+          { error: 'Unable to read existing balances.' },
+          { status: 500 }
+        );
+      }
 
-  let updated = 0;
-  let numbersFound = 0;
-  let programsFound = 0;
+      if (
+        existing?.verified_at &&
+        new Date(existing.verified_at).getTime() >
+          candidate.when
+      ) {
+        continue;
+      }
 
-  // Save balances without overwriting newer statements.
-  for (const [program_id, candidate] of balances) {
-    const { data: existing } = await db
-      .from('balances')
-      .select('verified_at,source,membership_number')
-      .eq('user_id', user.id)
-      .eq('program_id', program_id)
-      .maybeSingle();
+      const { error } = await db.from('balances').upsert(
+        {
+          user_id: user.id,
+          program_id,
+          balance: candidate.balance,
+          source: 'gmail',
+          verified_at: new Date(
+            candidate.when
+          ).toISOString(),
+          evidence: 'Gmail message ' + candidate.id,
+          membership_number:
+            existing?.membership_number ||
+            memberships.get(program_id)?.number ||
+            null
+        },
+        {
+          onConflict: 'user_id,program_id'
+        }
+      );
 
-    if (
-      existing?.verified_at &&
-      new Date(existing.verified_at).getTime() > candidate.when
-    ) {
-      continue;
+      if (error) {
+        console.error('Balance save error:', error.message);
+
+        return NextResponse.json(
+          { error: 'Unable to save a Gmail balance.' },
+          { status: 500 }
+        );
+      }
+
+      updated++;
     }
 
-    const { error } = await db.from('balances').upsert(
-      {
-        user_id: user.id,
-        program_id,
-        balance: candidate.balance,
-        source: 'gmail',
-        verified_at: new Date(candidate.when).toISOString(),
-        evidence: 'Gmail message ' + candidate.id,
-        membership_number:
-          memberships.get(program_id)?.number ||
-          existing?.membership_number ||
-          null
-      },
-      {
-        onConflict: 'user_id,program_id'
+    // Save membership numbers without overwriting balances.
+    for (const [program_id, candidate] of memberships) {
+      const { data: existing, error: readError } = await db
+        .from('balances')
+        .select('program_id,membership_number')
+        .eq('user_id', user.id)
+        .eq('program_id', program_id)
+        .maybeSingle();
+
+      if (readError) {
+        return NextResponse.json(
+          { error: 'Unable to read membership records.' },
+          { status: 500 }
+        );
       }
-    );
 
-    if (!error) updated++;
-  }
+      if (!existing || existing.membership_number) {
+        continue;
+      }
 
-  // Save membership numbers even if no balance was found.
-  // Existing balances must be preserved.
-  for (const [program_id, candidate] of memberships) {
-    const { data: existing } = await db
-      .from('balances')
-      .select('program_id,membership_number')
-      .eq('user_id', user.id)
-      .eq('program_id', program_id)
-      .maybeSingle();
+      const { error } = await db
+        .from('balances')
+        .update({
+          membership_number: candidate.number
+        })
+        .eq('user_id', user.id)
+        .eq('program_id', program_id);
 
-    if (!existing) continue;
+      if (error) {
+        return NextResponse.json(
+          { error: 'Unable to save a membership number.' },
+          { status: 500 }
+        );
+      }
 
-    if (existing.membership_number) continue;
+      numbersFound++;
+    }
 
-    const { error } = await db
-      .from('balances')
-      .update({
-        membership_number: candidate.number
-      })
-      .eq('user_id', user.id)
-      .eq('program_id', program_id);
+    // Save possible additional programs.
+    for (const discovery of discoveries.values()) {
+      const { data: existing, error: readError } = await db
+        .from('discovered_programs')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('program_name', discovery.program_name)
+        .maybeSingle();
 
-    if (!error) numbersFound++;
-  }
+      if (readError) {
+        return NextResponse.json(
+          { error: 'Unable to read discovered programs.' },
+          { status: 500 }
+        );
+      }
 
-  // Save possible new programs for later confirmation.
-  for (const discovery of discoveries.values()) {
-    const { data: existing } = await db
-      .from('discovered_programs')
-      .select('id')
-      .eq('user_id', user.id)
-      .eq('program_name', discovery.program_name)
-      .maybeSingle();
+      if (existing) continue;
 
-    if (existing) continue;
+      const { error } = await db
+        .from('discovered_programs')
+        .insert({
+          user_id: user.id,
+          program_name: discovery.program_name,
+          category: discovery.category,
+          membership_number: discovery.membership_number,
+          evidence: discovery.evidence,
+          confirmed: false
+        });
 
-    const { error } = await db
-      .from('discovered_programs')
-      .insert({
-        user_id: user.id,
-        program_name: discovery.program_name,
-        category: discovery.category,
-        membership_number: discovery.membership_number,
-        evidence: discovery.evidence,
-        confirmed: false
-      });
+      if (error) {
+        return NextResponse.json(
+          { error: 'Unable to save a discovered program.' },
+          { status: 500 }
+        );
+      }
 
-    if (!error) programsFound++;
+      programsFound++;
+    }
+
+    pages++;
+    scannedTotal += ids.length;
+
+    const nextToken: string | undefined =
+      result.nextPageToken;
+
+    complete = !nextToken;
+
+    // Save progress only after the entire page
+    // has been processed and saved successfully.
+    const { error: saveProgressError } = await db
+      .from('gmail_scan_progress')
+      .upsert(
+        {
+          user_id: user.id,
+          page_token: nextToken || null,
+          scanned_total: scannedTotal,
+          updated_at: new Date().toISOString()
+        },
+        {
+          onConflict: 'user_id'
+        }
+      );
+
+    if (saveProgressError) {
+      return NextResponse.json(
+        { error: 'Unable to save Gmail scan progress.' },
+        { status: 500 }
+      );
+    }
+
+    pageToken = nextToken;
+
+    if (complete) break;
   }
 
   return NextResponse.json({
     scanned,
+    scannedTotal,
     pages,
     updated,
     numbersFound,
     programsFound,
-    note:
-      'Historical Gmail scan completed for this batch. Additional scans may be needed.'
+    complete,
+    note: complete
+      ? 'Five-year Gmail scan completed.'
+      : 'Batch completed. Click Sync from Gmail again to continue scanning older emails.'
   });
 }
