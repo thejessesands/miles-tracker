@@ -1,0 +1,4 @@
+import { NextResponse } from 'next/server';
+import { serverDb } from '../../../lib/supabase';
+import { PROGRAMS } from '../../../lib/programs';
+export async function POST(req:Request){const db=await serverDb();const {data:{user}}=await db.auth.getUser();if(!user)return NextResponse.json({error:'Unauthorized'},{status:401});const body=await req.json();if(!PROGRAMS.some(p=>p.id===body.program_id)||!Number.isSafeInteger(body.balance)||body.balance<0)return NextResponse.json({error:'Invalid balance'},{status:400});const {error}=await db.from('balances').upsert({user_id:user.id,program_id:body.program_id,balance:body.balance,source:'manual',verified_at:new Date().toISOString(),evidence:null},{onConflict:'user_id,program_id'});return NextResponse.json(error?{error:error.message}:{ok:true},{status:error?500:200});}
