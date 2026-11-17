@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { serverDb } from '@/lib/supabase-server';
 import { PROGRAMS } from '@/lib/programs';
-import { encrypt } from '../../../lib/scan-crypto';
+import { encrypt } from '@/lib/scan-crypto';
+import { adminDb } from '@/lib/admin';
 export async function POST(){
  const db=await serverDb();const {data:{user}}=await db.auth.getUser();if(!user)return NextResponse.json({error:'Unauthorized'},{status:401});
  const {data:{session}}=await db.auth.getSession();
