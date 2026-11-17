@@ -1,0 +1,16 @@
+name: Automatic Gmail scan
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run scanner
+        env:
+          SCAN_URL: ${{ secrets.SCAN_URL }}
+          SCAN_CRON_SECRET: ${{ secrets.SCAN_CRON_SECRET }}
+        run: |
+          test -n "$SCAN_URL" && test -n "$SCAN_CRON_SECRET"
+          curl --fail-with-body --retry 2 --max-time 65 -X POST "$SCAN_URL/api/worker" -H "Authorization: Bearer $SCAN_CRON_SECRET"
