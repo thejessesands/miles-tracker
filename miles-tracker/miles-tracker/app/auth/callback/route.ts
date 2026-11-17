@@ -19,7 +19,13 @@ export async function GET(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(
+  cookiesToSet: {
+    name: string;
+    value: string;
+    options: Parameters<typeof redirectResponse.cookies.set>[2];
+  }[]
+) {
           cookiesToSet.forEach(({ name, value, options }) => {
             redirectResponse.cookies.set(name, value, options);
           });
