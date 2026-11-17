@@ -103,7 +103,6 @@ export default function Home() {
     if (field === 'balance') {
       const balance=Number(value.replace(/,/g,''));
       if (!Number.isSafeInteger(balance)||balance<0) {setMessage('Enter a valid nonnegative whole number.');return;}
-      if (discovered) {setMessage('Balance editing for manually added programs requires a separate API update.');return;}
       const res=await fetch('/api/balances',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({program_id:id,balance})});
       const json=await res.json();if(!res.ok){setMessage(json.error||'Unable to save balance.');return;}
     } else if (discovered) {
