@@ -220,7 +220,7 @@ export default function Home() {
             M<span>✦</span>
           </div>
 
-          <div className="eyebrow">YOUR REWARDS, ONE PLACE</div>
+          <div className="eyebrow">YOUR PERSONAL LOYALTY TRACKER</div>
 
           <h1>
             Every mile.
@@ -241,7 +241,7 @@ export default function Home() {
 
           <div className="login-note">
             <ShieldCheck size={16} />
-            Gmail access is read-only. You control when to sync.
+            Gmail access is read-only. Your updates require approval.
           </div>
 
           {message && <div className="notice">{message}</div>}
@@ -249,18 +249,18 @@ export default function Home() {
 
         <div className="login-art">
           <div className="art-circle">
-            {PROGRAMS.length}
+            M<span style={{fontSize: 30, verticalAlign: 'middle'}}>✦</span>
             <small>
-              programs
+              YOUR PERSONAL
               <br />
-              one view
+              REWARDS TRACKER
             </small>
           </div>
 
           <div className="art-label">
-            MILES & POINTS
+MY MILES & POINTS
             <br />
-            DASHBOARD — 2026
+            PRIVATE LOYALTY TRACKER
           </div>
         </div>
       </main>
@@ -316,34 +316,23 @@ export default function Home() {
           </span>
         </header>
 
-        <section className="hero">
+        <section className="hero" style={{padding:'20px 24px',minHeight:'auto',marginBottom:16}}>
           <div>
-            <div className="eyebrow">YOUR LOYALTY PORTFOLIO</div>
-
-            <h1>
-              All your rewards.
-              <br />
-              <em>One clear picture.</em>
-            </h1>
-
-            <p>
-              Your miles, points, and membership accounts—organized
-              in one place.
-            </p>
+            <div className="eyebrow">MY LOYALTY ACCOUNTS</div>
+            <h1 style={{fontSize:'clamp(25px, 3vw, 36px)',lineHeight:1.15,margin:'6px 0'}}>My Miles &amp; Points</h1>
+            <p style={{margin:0}}>Balances, membership numbers, and rewards updates at a glance.</p>
           </div>
-
-          <div className="hero-deco">✳</div>
         </section>
 
         <section className="stats">
           <div className="stat">
-            <span>LOYALTY PROGRAMS</span>
+            <span>MY PROGRAMS</span>
             <strong>{tracked.length}</strong>
-            <small>Programs with recorded balances</small>
+            <small>Programs in your tracker</small>
           </div>
 
           <div className="stat">
-            <span>PROGRAMS TRACKED</span>
+            <span>PROGRAMS AVAILABLE</span>
 
             <strong>
               {tracked.length}
@@ -356,9 +345,9 @@ export default function Home() {
           </div>
 
           <div className="stat">
-            <span>NEEDS ATTENTION</span>
-            <strong>{stale}</strong>
-            <small>Balances older than 30 days</small>
+            <span>EXPIRING SOON</span>
+            <strong>{expiring.length}</strong>
+            <small>Within the next 90 days</small>
           </div>
         </section>
 
@@ -383,40 +372,6 @@ export default function Home() {
             </button>
           </div>
 
-          {scanStatus && <div className="notice">
-            <RefreshCw size={16}/>
-            {scanStatus.phase === 'historical'
-              ? `Daily scan initializing: ${fmt(scanStatus.scanned_total)} emails processed.`
-              : `Automatic scanning active. ${fmt(scanStatus.scanned_total)} emails processed.`}
-            {scanStatus.last_scan_at && ` Last completed: ${new Date(scanStatus.last_scan_at).toLocaleString()}.`}
-            {scanStatus.last_error && ` Retrying after error: ${scanStatus.last_error}`}
-          </div>}
-          {balanceSuggestions.length>0 && <div className="notice" style={{display:'block'}}>
-            <strong>Suggested balance updates — review before applying:</strong>
-            {balanceSuggestions.map(s=>{
-              const program=all.find(p=>p.id===s.program_id);
-              return <div key={s.id} style={{marginTop:10,display:'flex',gap:12,alignItems:'center',justifyContent:'space-between'}}>
-                <span>{program?.name||s.program_id}: {program?.record ? fmt(program.record.balance) : '—'} → {fmt(s.suggested_balance)}{s.email_date?` · Email ${new Date(s.email_date).toLocaleDateString()}`:''}</span>
-                <div style={{display:'flex',gap:8}}><button className="edit" onClick={()=>void reviewBalance(s.id,'approve')}>Approve</button><button className="edit" onClick={()=>void reviewBalance(s.id,'dismiss')}>Dismiss</button></div>
-              </div>;
-            })}
-          </div>}
-          {discoveries.some(d=>!d.confirmed && !d.dismissed) && <div className="notice" style={{display:'block'}}>
-            <strong>Possible memberships — confirm the programs you actually use:</strong>
-            {discoveries.filter(d=>!d.confirmed && !d.dismissed).sort((a,b)=>a.program_name.localeCompare(b.program_name)).map(d=>(
-              <div key={d.id} style={{marginTop:10,display:'flex',gap:12,alignItems:'center',justifyContent:'space-between'}}>
-                <span>{d.program_name}{d.membership_number?` · Member ${d.membership_number}`:''}</span>
-                <div style={{display:"flex",gap:8}}><button className="edit" onClick={()=>confirmDiscovery(d.id,true)}>Add program</button><button className="edit" onClick={()=>dismissDiscovery(d.id)}>Dismiss</button></div>
-              </div>
-            ))}
-          </div>}
-          <div className="notice" style={{display:'block'}}>
-            <strong>Miles expiring soon (next 90 days)</strong>
-            {expiring.length ? expiring.map(p => {
-              const days=Math.ceil((new Date(p.expiresAt!).getTime()-Date.now())/86400000);
-              return <div key={p.id} style={{marginTop:8}}>{p.name}: {new Date(p.expiresAt!).toLocaleDateString()} — {days} days remaining{days<=30?' · Urgent':days<=60?' · Within 60 days':' · Within 90 days'}</div>;
-            }) : <div style={{marginTop:8}}>No recorded expiration dates within 90 days. Use “Set expiration” on an account to add one.</div>}
-          </div>
           <div style={{margin:'16px 0'}}>
             <button className="sync" onClick={()=>setAddingProgram(!addingProgram)}>{addingProgram?'Cancel':'Add a loyalty program manually'}</button>
             {addingProgram && <div className="notice" style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:10}}>
@@ -581,17 +536,24 @@ export default function Home() {
             )}
           </div>
 
-          <p className="footnote">
-            Balances and membership numbers are obtained from Gmail
-            statements when available. Gmail synchronization does not
-            query live loyalty accounts.
-          </p>
-        </section>
-
-        <footer>
-          MADE FOR THE JOURNEYS AHEAD <span>✦</span> MILES & POINTS
-        </footer>
-      </main>
-    </div>
-  );
-}
+           <div style={{marginTop:24}}>
+             <h2 style={{marginBottom:12}}>Updates &amp; reminders</h2>
+          {scanStatus && <div className="notice">
+            <RefreshCw size={16}/>
+            {scanStatus.phase === 'historical'
+              ? `Daily scan initializing: ${fmt(scanStatus.scanned_total)} emails processed.`
+              : `Automatic scanning active. ${fmt(scanStatus.scanned_total)} emails processed.`}
+            {scanStatus.last_scan_at && ` Last completed: ${new Date(scanStatus.last_scan_at).toLocaleString()}.`}
+            {scanStatus.last_error && ` Retrying after error: ${scanStatus.last_error}`}
+          </div>}
+          {balanceSuggestions.length>0 && <div className="notice" style={{display:'block'}}>
+            <strong>Suggested balance updates — review before applying:</strong>
+            {balanceSuggestions.map(s=>{
+              const program=all.find(p=>p.id===s.program_id);
+              return <div key={s.id} style={{marginTop:10,display:'flex',gap:12,alignItems:'center',justifyContent:'space-between'}}>
+                <span>{program?.name||s.program_id}: {program?.record ? fmt(program.record.balance) : '—'} → {fmt(s.suggested_balance)}{s.email_date?` · Email ${new Date(s.email_date).toLocaleDateString()}`:''}</span>
+                <div style={{display:'flex',gap:8}}><button className="edit" onClick={()=>void reviewBalance(s.id,'approve')}>Approve</button><button className="edit" onClick={()=>void reviewBalance(s.id,'dismiss')}>Dismiss</button></div>
+              </div>;
+            })}
+          </div>}
+          {discoveries.some(d=>!d.confirmed && !d.dismissed) && <div className="notice" style={{display:'
