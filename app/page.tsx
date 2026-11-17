@@ -21,6 +21,8 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
   const [rows, setRows] = useState<Balance[]>([]);
+  const [discoveries, setDiscoveries] = useState<{id:string;program_name:string;category:string;membership_number:string|null;confirmed:boolean}[]>([]);
+  const [scanStatus, setScanStatus] = useState<{phase:string;scanned_total:number;last_scan_at:string|null;last_error:string|null;retry_after:string|null}|null>(null);
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
@@ -39,8 +41,14 @@ export default function Home() {
     if (u) {
       const { data } = await db.from('balances').select('*');
       setRows((data || []) as Balance[]);
+      const {data:found}=await db.from('discovered_programs').select('id,program_name,category,membership_number,confirmed');
+      setDiscoveries(found || []);
+      const status=await fetch('/api/scan-status').then(r=>r.ok?r.json():null).catch(()=>null);
+      setScanStatus(status?.scan || null);
     } else {
       setRows([]);
+      setDiscoveries([]);
+      setScanStatus(null);
     }
   }, [db]);
 
@@ -53,6 +61,17 @@ export default function Home() {
 
     return () => subscription.unsubscribe();
   }, [db, reload]);
+
+  useEffect(() => {
+    if (!user) return;
+    const timer = setInterval(() => { void reload(); }, 60000);
+    return () => clearInterval(timer);
+  }, [user, reload]);
+
+  async function confirmDiscovery(id:string,confirmed:boolean){
+    const {error}=await db.from('discovered_programs').update({confirmed}).eq('id',id);
+    if(error)setMessage(error.message);else await reload();
+  }
 
   async function signIn() {
     setMessage('');
@@ -75,6 +94,7 @@ export default function Home() {
   async function save(id: string) {
     const balance = Number(entry.replace(/,/g, ''));
 
+    if (id.startsWith('discovered:')) { setMessage('Balance editing for discovered programs is not yet supported.'); return; }
     if (!Number.isSafeInteger(balance) || balance < 0) {
       setMessage('Enter a valid nonnegative whole number.');
       return;
@@ -114,7 +134,7 @@ export default function Home() {
 
       setMessage(
         res.ok
-          ? `Checked ${j.scanned} emails; updated ${j.updated} balances. ${j.note}`
+          ? j.note
           : j.error
       );
 
@@ -126,10 +146,13 @@ export default function Home() {
     }
   }
 
-  const all = PROGRAMS.map(p => ({
-    ...p,
-    record: rows.find(r => r.program_id === p.id)
-  }));
+  const all = [
+    ...PROGRAMS.map(p => ({...p,record:rows.find(r => r.program_id === p.id)})),
+    ...discoveries.filter(d => d.confirmed).map(d => ({
+      id:'discovered:'+d.id,name:d.program_name,category:d.category,unit:'points',color:'#64748b',
+      record:undefined as Balance | undefined, discoveredNumber:d.membership_number
+    }))
+  ].sort((a,b)=>a.name.localeCompare(b.name));
 
   const tracked = all.filter(p => !!p.record);
 
@@ -284,11 +307,11 @@ export default function Home() {
 
             <strong>
               {tracked.length}
-              <b> / {PROGRAMS.length}</b>
+              <b> / {all.length}</b>
             </strong>
 
             <small>
-              {PROGRAMS.length - tracked.length} balances to add
+              {all.length - tracked.length} balances to add
             </small>
           </div>
 
@@ -316,10 +339,27 @@ export default function Home() {
                 className={syncing ? 'spin' : ''}
               />
 
-              {syncing ? 'Checking Gmail…' : 'Sync from Gmail'}
+              {syncing ? 'Enabling…' : 'Enable automatic Gmail scan'}
             </button>
           </div>
 
+          {scanStatus && <div className="notice">
+            <RefreshCw size={16}/>
+            {scanStatus.phase === 'historical'
+              ? `Three-year scan in progress: ${fmt(scanStatus.scanned_total)} emails processed.`
+              : `Automatic scanning active. ${fmt(scanStatus.scanned_total)} emails processed.`}
+            {scanStatus.last_scan_at && ` Last completed: ${new Date(scanStatus.last_scan_at).toLocaleString()}.`}
+            {scanStatus.last_error && ` Retrying after error: ${scanStatus.last_error}`}
+          </div>}
+          {discoveries.some(d=>!d.confirmed) && <div className="notice" style={{display:'block'}}>
+            <strong>Possible memberships — confirm the programs you actually use:</strong>
+            {discoveries.filter(d=>!d.confirmed).sort((a,b)=>a.program_name.localeCompare(b.program_name)).map(d=>(
+              <div key={d.id} style={{marginTop:10,display:'flex',gap:12,alignItems:'center',justifyContent:'space-between'}}>
+                <span>{d.program_name}{d.membership_number?` · Member ${d.membership_number}`:''}</span>
+                <button className="edit" onClick={()=>confirmDiscovery(d.id,true)}>Add program</button>
+              </div>
+            ))}
+          </div>}
           <div className="toolbar">
             <div className="filters">
               {['All', 'Airlines', 'Hotels', 'Credit Cards'].map(f => (
@@ -391,7 +431,7 @@ export default function Home() {
 
                     <td>
                       <span className="membership">
-                        {p.record?.membership_number || 'Not found'}
+                        {p.record?.membership_number || ('discoveredNumber' in p ? p.discoveredNumber : null) || 'Not found'}
                       </span>
                     </td>
 

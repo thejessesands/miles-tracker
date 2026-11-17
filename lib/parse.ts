@@ -265,6 +265,13 @@ export function extractMemberships(
   }];
 }
 
+export function hasAccountActivity(subject: string, body: string): boolean {
+ const text = cleanText(subject, body);
+ const promotional = /\b(unsubscribe|limited.time offer|shop now|special offer|earn bonus points|exclusive deal)\b/i.test(subject);
+ const accountSpecific = /\b(your (?:current |available |new |ending )?(?:points|miles|avios)? ?balance|account statement|monthly statement|points earned|miles earned|points redeemed|miles redeemed|redemption confirmation|membership number|member number|member id|frequent flyer number|account activity|transaction history)\b/i.test(text);
+ return accountSpecific && !(promotional && !/\b(account statement|transaction history|points redeemed|miles redeemed)\b/i.test(subject));
+}
+
 export function discoverPrograms(
   subject: string,
   body: string
@@ -277,13 +284,13 @@ export function discoverPrograms(
   const membershipEvidence =
     /\b(welcome to|your membership|member number|membership number|member id|loyalty account|your account statement|points balance|miles balance)\b/i.test(text);
 
-  for (const program of additionalPrograms) {
-    if (!program.hints.test(text)) continue;
+  const matches = additionalPrograms.filter(program => program.hints.test(text));
+  for (const program of matches) {
 
     found.push({
       program_name: program.name,
       category: program.category,
-      membership_number: membershipNumber,
+      membership_number: matches.length === 1 ? membershipNumber : null,
       confirmed: false
     });
   }

@@ -1,0 +1,4 @@
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+const key = () => { const value = process.env.GMAIL_TOKEN_ENCRYPTION_KEY; if (!value || !/^[a-f0-9]{64}$/i.test(value)) throw new Error('GMAIL_TOKEN_ENCRYPTION_KEY must be 64 hex characters'); return Buffer.from(value, 'hex'); };
+export function encrypt(value: string) { const iv = randomBytes(12); const cipher = createCipheriv('aes-256-gcm', key(), iv); const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]); return Buffer.concat([iv, cipher.getAuthTag(), ciphertext]).toString('base64'); }
+export function decrypt(value: string) { const raw = Buffer.from(value, 'base64'); const decipher = createDecipheriv('aes-256-gcm', key(), raw.subarray(0,12)); decipher.setAuthTag(raw.subarray(12,28)); return Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString('utf8'); }
