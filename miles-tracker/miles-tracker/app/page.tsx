@@ -5,7 +5,6 @@ import {PROGRAMS,type Balance} from '../lib/programs';
 import type {User} from '@supabase/supabase-js';
 import {ArrowUpRight,RefreshCw,LogOut,Wallet,ShieldCheck,Search,CheckCircle2,AlertCircle} from 'lucide-react';
 const fmt=(n:number)=>new Intl.NumberFormat('en-US').format(n);
-const money=(n:number)=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n);
 export default function Home(){
  const [user,setUser]=useState<User|null>(null),[ready,setReady]=useState(false),[rows,setRows]=useState<Balance[]>([]),[syncing,setSyncing]=useState(false),[message,setMessage]=useState(''),[editing,setEditing]=useState<string|null>(null),[entry,setEntry]=useState(''),[filter,setFilter]=useState('All'),[search,setSearch]=useState('');
  const db=useMemo(()=>browserDb(),[]);
