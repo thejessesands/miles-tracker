@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { serverDb } from '../../../lib/supabase-server';
+import { serverDb } from '@/lib/supabase-server';
 import { adminDb } from '../../../lib/admin';
 import { encrypt } from '../../../lib/scan-crypto';
 export async function POST(){
